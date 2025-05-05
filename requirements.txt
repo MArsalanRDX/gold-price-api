@@ -1,2 +1,5 @@
-Flask==2.3.3
+pandas
 requests
+matplotlib
+matplotlib.pyplot
+plt
