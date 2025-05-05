@@ -1,65 +1,65 @@
-from flask import Flask, jsonify
-import requests
-from datetime import datetime
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
 
-app = Flask(__name__)
+st.title("📊 Futures ROI & PNL Calculator")
 
-OZ_TO_GRAM = 31.1035
-TOLA_TO_GRAM = 11.66
+st.markdown("""
+### 📝 Input Values:
+Fill in the following details to calculate your Futures trading performance.
+""")
 
-GOLD_API_URL = "https://data-asg.goldprice.org/dbXRates/USD"
-FOREX_API_URL = "https://api.exchangerate-api.com/v4/latest/USD"
+# User Inputs
+entry_price = st.number_input("1️⃣ Current Price / Entry Price", min_value=0.0, value=3339.0, format="%.10f")
+capital = st.number_input("2️⃣ Capital (USDT)", min_value=1.0, value=100.0)
+leverage = st.number_input("3️⃣ Leverage (e.g. 10x, 20x, etc.)", min_value=1, value=30)
+take_profit = st.number_input("4️⃣ Take Profit / Close Position Price", min_value=0.0, value=3450.0, format="%.10f")
+stop_loss = st.number_input("5️⃣ Stop Loss Price", min_value=0.0, value=3290.0, format="%.10f")
+decimal_places = st.number_input("🔢 Decimal Digits After Price (e.g. 2 for 0.01, 4 for 0.0001)", min_value=0, max_value=10, value=2)
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0',
-    'Accept': 'application/json'
-}
+# Calculations
+position_size = capital * leverage
+quantity = position_size / entry_price
+step = 1 / (10 ** decimal_places)
 
-def fetch_prices():
-    try:
-        gold_res = requests.get(GOLD_API_URL, headers=HEADERS).json()
-        forex_res = requests.get(FOREX_API_URL).json()
-        usd_to_pkr = forex_res['rates']['PKR']
+# Generate price ranges
+price_up = [round(p, decimal_places) for p in list(pd.Series([entry_price + i * step for i in range(int((take_profit - entry_price) / step) + 1)]))]
+price_down = [round(p, decimal_places) for p in list(pd.Series([entry_price - i * step for i in range(1, int((entry_price - stop_loss) / step) + 1)]))]
 
-        item = gold_res['items'][0]
-        gold_oz = item['xauPrice']
-        silver_oz = item['xagPrice']
+def calculate_metrics(price_list):
+    data = []
+    for price in price_list:
+        unrealized_pnl = (price - entry_price) * quantity
+        roi = (unrealized_pnl / capital) * 100
+        margin_ratio = (capital / (capital + unrealized_pnl)) * 100 if (capital + unrealized_pnl) != 0 else float('inf')
+        data.append({
+            'Price': price,
+            'Unrealized PNL (USDT)': round(unrealized_pnl, 4),
+            'ROI (%)': round(roi, 4),
+            'Margin Ratio (%)': round(margin_ratio, 2)
+        })
+    return pd.DataFrame(data)
 
-        # Gold conversions
-        gold_g = gold_oz / OZ_TO_GRAM
-        gold_tola = gold_g * TOLA_TO_GRAM
+if st.button("🔍 Calculate"):
+    df_up = calculate_metrics(price_up)
+    df_down = calculate_metrics(price_down)
 
-        # Silver conversions
-        silver_g = silver_oz / OZ_TO_GRAM
-        silver_tola = silver_g * TOLA_TO_GRAM
+    st.subheader("📈 Price Increasing Table")
+    st.dataframe(df_up, use_container_width=True)
 
-        return {
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "usd_to_pkr": usd_to_pkr,
-            "gold": {
-                "oz": round(gold_oz, 2),
-                "g": round(gold_g, 2),
-                "tola": round(gold_tola, 2),
-                "oz_pkr": round(gold_oz * usd_to_pkr, 2),
-                "g_pkr": round(gold_g * usd_to_pkr, 2),
-                "tola_pkr": round(gold_tola * usd_to_pkr, 2),
-            },
-            "silver": {
-                "oz": round(silver_oz, 2),
-                "g": round(silver_g, 2),
-                "tola": round(silver_tola, 2),
-                "oz_pkr": round(silver_oz * usd_to_pkr, 2),
-                "g_pkr": round(silver_g * usd_to_pkr, 2),
-                "tola_pkr": round(silver_tola * usd_to_pkr, 2),
-            }
-        }
+    st.subheader("📉 Price Decreasing Table")
+    st.dataframe(df_down, use_container_width=True)
 
-    except Exception as e:
-        return {"error": str(e)}
+    # Plotting ROI Chart
+    fig, ax = plt.subplots()
+    ax.plot(df_up['Price'], df_up['ROI (%)'], label='ROI Up', color='green')
+    ax.plot(df_down['Price'], df_down['ROI (%)'], label='ROI Down', color='red')
+    ax.set_xlabel("Price")
+    ax.set_ylabel("ROI (%)")
+    ax.set_title("ROI vs Price")
+    ax.legend()
+    st.pyplot(fig)
 
-@app.route("/")
-def index():
-    return jsonify(fetch_prices())
-
-if __name__ == "__main__":
-    app.run(debug=True)
+    st.markdown("---")
+    st.markdown(f"**✅ Profit at Take Profit ({take_profit}):** {round((take_profit - entry_price) * quantity, 4)} USDT")
+    st.markdown(f"**❌ Loss at Stop Loss ({stop_loss}):** {round((stop_loss - entry_price) * quantity, 4)} USDT")
